@@ -1,20 +1,20 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
 
-unsigned long long get_unix_time()
+char* unix_time_formatted(long time, char* format_character)
 {
-    struct timeval tv;
+    struct tm time_formatted;
+    char* buf = (char*)malloc(4 * sizeof(char));
+    time_formatted = *localtime(&time);
+    strftime(buf, sizeof(buf), format_character, &time_formatted);
 
-    gettimeofday(&tv, NULL);
-
-    unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
-
-    return millisecondsSinceEpoch;
+    return buf;
 }
 
 //NOTE: This is currently in milliseconds
-void print_unix_time_formatted(unsigned long long time)
+void print_unix_time_formatted(unsigned long time)
 {
-    printf("Unformatted Time: %llu\n", time);
+    printf("Unformatted Time: %lu\n", time);
 }

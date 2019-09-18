@@ -28,7 +28,7 @@ int main()
     //TRUE = 1
     //FALSE = 0
     CURL* curl;
-    CURLcode res;
+    //CURLcode res;
 
     curl_global_init(0);
     curl = curl_easy_init();
@@ -46,6 +46,8 @@ int main()
     strcpy(reef_account.password, password);
 
     printf("\nLogging in...\n");
+    //TEMP: I don't reall know what to do with curl var so its all over the place currently.
+    reef_account.curl = curl;
 
     //TODO: We don't really need to use res. Either just create one for each method call or not all all.
     if (validate_account(curl, &reef_account)) {
@@ -87,21 +89,20 @@ int main()
     print_reef_account(reef_account);
 
     printf("Waiting for class to start...\n");
-
-    //pthread_t tid;
-    //pthread_create(&tid, NULL, backupThread, (void*)args);
-    //pthread_join(tid, NULL);
-
     printf("P.S. Type help to see available commands!\n");
+
+    pthread_t tid;
+    pthread_create(&tid, NULL, class_check_thread, (void*)&reef_account);
 
     char command[256];
     while (strcmp(command, "stop") != 0) {
         scanf("%s", command);
-
         if (strcmp(command, "help") == 0)
             printf("heeeeeeeeeelp\n");
-        else if (strcmp(command, "stop") == 0)
-            printf("Stopping...\n");
+        else if (strcmp(command, "stop") == 0) {
+            reef_account.check_for_class = 0;
+            pthread_cancel(tid);
+        }
     }
 
     /* always cleanup */
@@ -342,8 +343,6 @@ int course_info(CURL* curl, ReefAccount* reef_account)
     CurlReader curl_reader;
     create_curl_reader(&curl_reader);
 
-    printf("OUT: %s\n", curl_reader.characters);
-
     /* Turns this into a GET request */
     curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     //curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, hdf);
@@ -380,7 +379,7 @@ int course_info(CURL* curl, ReefAccount* reef_account)
         for (j = 0; j < json_object_array_length(arr_meeting_times); j++) {
             struct json_object* int_meeting_time = json_object_array_get_idx(arr_meeting_times, j);
 
-            reef_account->reef_courses[i].meeting_times[j] = (unsigned long long)strtoll(json_object_get_string(int_meeting_time), NULL, 0);
+            reef_account->reef_courses[i].meeting_times[j] = (unsigned long)((unsigned long long)strtoll(json_object_get_string(int_meeting_time), NULL, 0) / 1000);
             meeting_time_amount++;
         }
 
@@ -394,7 +393,7 @@ int course_info(CURL* curl, ReefAccount* reef_account)
     return 0;
 }
 
-int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse* reef_course)
+int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse reef_course)
 {
 
     char geo_location_json[256] = "{\"geo\":{\"accuracy\":39,\"lat\":29.584474999999998,\"lon\":-98.61909589999999},\"publicIP\":null,\"auto\":false,\"id\":\"fbfa1fc2-9cf9-4096-a788-a2aae933f19c\"};";
@@ -411,7 +410,7 @@ int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse* reef_course)
 
     /* Now specify the POST data */
     char class_url[256];
-    sprintf(class_url, "https://api.reef-education.com/trogon/v2/course/attendance/join/%s", reef_course->course_id);
+    sprintf(class_url, "https://api.reef-education.com/trogon/v2/course/attendance/join/%s", reef_course.course_id);
     curl_easy_setopt(curl, CURLOPT_URL, class_url);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, geo_location_json);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, -1L);
@@ -420,23 +419,24 @@ int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse* reef_course)
     CurlReader curl_reader;
     create_curl_reader(&curl_reader);
 
-    //curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, hdf);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, hdf);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_to_curl_reader);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &curl_reader);
 
     /* Perform the request, res will get the return code */
     curl_easy_perform(curl);
 
+    printf("OUT: %s\n", curl_reader.characters);
+
     struct json_object* parsed_json = json_tokener_parse(curl_reader.characters);
     struct json_object* str_err_check;
     json_object_object_get_ex(parsed_json, "error", &str_err_check);
 
     if (str_err_check) {
-        printf("Error: Class not in session");
+        printf("Error: Unable to join class");
         return 1;
     }
 
-    printf("OUT: %s\n", curl_reader.characters);
     curl_slist_free_all(post_header);
     json_object_put(parsed_json);
     free(auth_token);
@@ -456,7 +456,6 @@ struct curl_slist* default_post_headers()
     return post_header;
 }
 
-//?????? Do I want to pass a pointer here?
 void print_reef_account(ReefAccount reef_account)
 {
     printf("\n------ Reef Account ------\n\n");
@@ -497,4 +496,52 @@ void free_reef_account(ReefAccount* reef_account)
     free(reef_account->user_id);
     //free(reef_account->jti);
     //free(reef_account->trial_status);
+}
+
+void* class_check_thread(void* account)
+{
+    ReefAccount* reef_account = (ReefAccount*)account;
+    reef_account->check_for_class = 1;
+
+    while (reef_account->check_for_class) {
+        sleep(5);
+        printf("Checking...\n");
+
+        //Utilize %H,%M,%P
+        long current_time;
+        time(&current_time);
+
+        int i;
+        for (i = 0; i < reef_account->course_count; i++) {
+            ReefCourse reef_course = reef_account->reef_courses[i];
+
+            int j;
+            for (j = 0; j < reef_course.meeting_time_amount; j++) {
+                long meeting_time = (long)reef_course.meeting_times[j];
+
+                //Check if the day of week is the same
+                if (strcmp(unix_time_formatted(current_time, "%a"), unix_time_formatted(meeting_time, "%a")) != 0)
+                    continue;
+
+                //Check if AM/PM is the same
+                if (strcmp(unix_time_formatted(current_time, "%P"), unix_time_formatted(meeting_time, "%P")) != 0)
+                    continue;
+
+                //Check if the hour is the same
+                if (strcmp(unix_time_formatted(current_time, "%H"), unix_time_formatted(meeting_time, "%H")) != 0)
+                    continue;
+
+                int current_mins = atoi(unix_time_formatted(current_time, "%M"));
+                int meeting_mins = atoi(unix_time_formatted(meeting_time, "%M"));
+
+                //If were in beetween the start of class & 5 miniute buffer period, attempt to sing in.
+                if (current_mins - meeting_mins > 0 && current_mins - meeting_mins <= 5) {
+                    printf("Joining %s\n", reef_course.name);
+                    join_course(reef_account->curl, reef_account, reef_course);
+                }
+            }
+        }
+    }
+
+    return 0;
 }
