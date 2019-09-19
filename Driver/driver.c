@@ -94,7 +94,7 @@ int main()
     pthread_t tid;
     pthread_create(&tid, NULL, class_check_thread, (void*)&reef_account);
 
-    char command[256];
+    char command[256] = "";
     while (strcmp(command, "stop") != 0) {
         scanf("%s", command);
         if (strcmp(command, "help") == 0)
@@ -106,6 +106,7 @@ int main()
     }
 
     /* always cleanup */
+    pthread_join(tid, NULL);
     free_reef_account(&reef_account);
     curl_easy_cleanup(curl);
     curl_global_cleanup();
@@ -384,6 +385,7 @@ int course_info(CURL* curl, ReefAccount* reef_account)
         }
 
         reef_account->reef_courses[i].meeting_time_amount = meeting_time_amount;
+        reef_account->reef_courses[i].joined = 0;
     }
 
     curl_slist_free_all(post_header);
@@ -436,6 +438,8 @@ int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse reef_course)
         printf("Error: Unable to join class");
         return 1;
     }
+
+    reef_course.joined = 1;
 
     curl_slist_free_all(post_header);
     json_object_put(parsed_json);
@@ -524,9 +528,13 @@ void* class_check_thread(void* account)
                     continue;
 
                 //Check if AM/PM is the same
-                if (strcmp(unix_time_formatted(current_time, "%P"), unix_time_formatted(meeting_time, "%P")) != 0)
-                    continue;
+                if (strcmp(unix_time_formatted(current_time, "%P"), unix_time_formatted(meeting_time, "%P")) != 0) {
 
+                    //At the end of the day, we can safley say our class is over.
+                    if (reef_course.joined)
+                        reef_course.joined = 0;
+                    continue;
+                }
                 //Check if the hour is the same
                 if (strcmp(unix_time_formatted(current_time, "%H"), unix_time_formatted(meeting_time, "%H")) != 0)
                     continue;
@@ -534,7 +542,7 @@ void* class_check_thread(void* account)
                 int current_mins = atoi(unix_time_formatted(current_time, "%M"));
                 int meeting_mins = atoi(unix_time_formatted(meeting_time, "%M"));
 
-                //If were in beetween the start of class & 5 miniute buffer period, attempt to sing in.
+                //If were in beetween the start of class & 5 miniute buffer period, AND we havent joined yet, attempt to sing in.
                 if (current_mins - meeting_mins > 0 && current_mins - meeting_mins <= 5) {
                     printf("Joining %s\n", reef_course.name);
                     join_course(reef_account->curl, reef_account, reef_course);

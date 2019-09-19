@@ -12,6 +12,7 @@ typedef struct ReefCourse {
     int start_date;
     int end_date;
     int remote_only;
+    int joined;
 } ReefCourse;
 
 typedef struct ReefAccount {
