@@ -30,7 +30,7 @@ int main()
     CURL* curl;
     //CURLcode res;
 
-    curl_global_init(0);
+    curl_global_init(CURL_GLOBAL_ALL);
     curl = curl_easy_init();
 
     if (!curl)
@@ -80,8 +80,6 @@ int main()
         printf("Error: Unable to get course info\n");
         return 1;
     }
-
-    //join_course(curl, &reef_account, &reef_account.reef_courses[0]);
 
     /* Scan for joining class packets */
     //curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
