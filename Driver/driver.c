@@ -399,8 +399,7 @@ int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse reef_course)
     char geo_location_json[256] = "{\"geo\":{\"accuracy\":39,\"lat\":29.584474999999998,\"lon\":-98.61909589999999},\"publicIP\":null,\"auto\":false,\"id\":\"fbfa1fc2-9cf9-4096-a788-a2aae933f19c\"};";
 
     /* Specifiy relevant POST headers */
-    struct curl_slist* post_header
-        = default_post_headers();
+    struct curl_slist* post_header = default_post_headers();
     char* auth_token = (char*)malloc((strlen("Authorization: Bearer ") + strlen(reef_account->access_token)) * sizeof(char) + 1);
     sprintf(auth_token, "%s%s", "Authorization: Bearer ", reef_account->access_token);
     post_header = curl_slist_append(post_header, auth_token);
@@ -432,10 +431,8 @@ int join_course(CURL* curl, ReefAccount* reef_account, ReefCourse reef_course)
     struct json_object* str_err_check;
     json_object_object_get_ex(parsed_json, "error", &str_err_check);
 
-    if (str_err_check) {
-        printf("Error: Unable to join class");
+    if (str_err_check)
         return 1;
-    }
 
     reef_course.joined = 1;
 
@@ -506,7 +503,6 @@ void* class_check_thread(void* account)
     reef_account->check_for_class = 1;
 
     while (reef_account->check_for_class) {
-        sleep(5);
         printf("Checking...\n");
 
         //Utilize %H,%M,%P
@@ -522,31 +518,51 @@ void* class_check_thread(void* account)
                 long meeting_time = (long)reef_course.meeting_times[j];
 
                 //Check if the day of week is the same
-                if (strcmp(unix_time_formatted(current_time, "%a"), unix_time_formatted(meeting_time, "%a")) != 0)
+
+                if (!same_unix_time_formatted(current_time, meeting_time, "%a"))
                     continue;
 
                 //Check if AM/PM is the same
-                if (strcmp(unix_time_formatted(current_time, "%P"), unix_time_formatted(meeting_time, "%P")) != 0) {
+                if (!same_unix_time_formatted(current_time, meeting_time, "%P")) {
 
                     //At the end of the day, we can safley say our class is over.
+                    //TODO: Maybe this should go somewhere else? not sure.
                     if (reef_course.joined)
                         reef_course.joined = 0;
                     continue;
                 }
+
+                //TODO: Instead of checking agiant the hours & mins, just substract the two tims & check if were between -5mins < time < 5mins
+
                 //Check if the hour is the same
-                if (strcmp(unix_time_formatted(current_time, "%H"), unix_time_formatted(meeting_time, "%H")) != 0)
+                if (!same_unix_time_formatted(current_time, meeting_time, "%H"))
                     continue;
 
-                int current_mins = atoi(unix_time_formatted(current_time, "%M"));
-                int meeting_mins = atoi(unix_time_formatted(meeting_time, "%M"));
+                char* current_time_min_format;
+                unix_time_formatted(&current_time_min_format, current_time, "%M");
+                char* meeting_time_min_format;
+                unix_time_formatted(&meeting_time_min_format, meeting_time, "%M");
+
+                int current_mins = atoi(current_time_min_format);
+                int meeting_mins = atoi(meeting_time_min_format);
+
+                free(current_time_min_format);
+                free(meeting_time_min_format);
 
                 //If were in beetween the start of class & 5 miniute buffer period, AND we havent joined yet, attempt to sing in.
-                if (current_mins - meeting_mins > 0 && current_mins - meeting_mins <= 5) {
-                    printf("Joining %s\n", reef_course.name);
-                    join_course(reef_account->curl, reef_account, reef_course);
+                if (current_mins - meeting_mins > 0 && current_mins - meeting_mins <= 5 && !reef_course.joined) {
+                    printf("Joining class %s\n", reef_course.name);
+                    if (join_course(reef_account->curl, reef_account, reef_course)) {
+                        printf("Error: Unable to join class");
+                        continue;
+                    }
+
+                    printf("Joined class %s\n", reef_course.name);
                 }
             }
         }
+
+        sleep(10);
     }
 
     return 0;
